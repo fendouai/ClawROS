@@ -45,13 +45,19 @@ ClawROS/
 │   ├── nodes/         # ROS 节点
 │   ├── launch/        # Launch 文件
 │   ├── msgs/          # 自定义消息
-│   └── services/      # 自定义服务
+│   ├── services/      # 自定义服务
+│   ├── clawros_bridge.py      # 核心桥接
+│   ├── clawros_tools.py       # OpenClaw 工具
+│   └── simple_simulator.py    # 模拟器（新增）
 ├── tests/             # 测试
 │   ├── unit/          # 单元测试
 │   ├── integration/   # 集成测试
 │   └── system/        # 系统测试
 ├── config/            # 配置文件
-└── examples/          # 示例
+└── examples/          # 示例（包含模拟环境演示）
+    ├── demo_simulation.py      # 完整演示
+    ├── simulator_launcher.py   # 模拟器启动器
+    └── SIMULATION_GUIDE.md     # 模拟环境指南
 ```
 
 ## 快速开始
@@ -59,8 +65,8 @@ ClawROS/
 ### 前置要求
 
 - Python 3.8+
-- ROS2 (Jazzy/Humble) 或 ROS1 (Noetic)
-- OpenClaw/ZeroClaw 环境
+- **可选**: ROS2 (Jazzy/Humble) 或 ROS1 (Noetic) - 不使用模拟环境时需要
+- OpenClaw/ZeroClaw 环境（可选）
 
 ### 安装
 
@@ -70,15 +76,19 @@ cd ClawROS
 
 # 安装依赖
 pip install -r requirements.txt
-
-# 构建 ROS 包
-colcon build
-
-#  sourced 环境
-source install/setup.bash
 ```
 
-### 基本使用
+### 🎮 模拟环境体验（无需 ROS）
+
+```bash
+# 运行完整演示
+python examples/demo_simulation.py
+
+# 启动独立模拟器
+python examples/simulator_launcher.py
+```
+
+### 基本使用（真实 ROS 环境）
 
 ```bash
 # 启动桥接节点
@@ -90,6 +100,7 @@ ros2 service call /clawros/command clawros/srv/Command "{command: 'move forward'
 
 ## 功能特性
 
+- ✅ **模拟环境** - 无需 ROS 硬件即可测试和开发
 - ✅ 自然语言到 ROS 命令转换
 - ✅ 支持 ROS2 Topics/Services/Actions
 - ✅ 支持 ROS1 (通过桥接)
