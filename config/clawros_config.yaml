@@ -1,0 +1,104 @@
+# ClawROS 配置文件
+
+# ROS 版本选择：ros1 或 ros2
+ros_version: "ros2"
+
+# 默认坐标系
+default_frame: "base_link"
+
+# 安全配置
+safety:
+  enabled: true
+  
+  # 速度限制
+  max_linear_velocity: 0.5    # m/s
+  max_angular_velocity: 1.0   # rad/s
+  
+  # 工作空间边界（米）
+  workspace_bounds:
+    x: [-2.0, 2.0]
+    y: [-2.0, 2.0]
+    z: [0.0, 1.5]
+  
+  # 碰撞检测
+  collision_check: true
+  safety_distance: 0.3        # m
+  
+  # 紧急停止配置
+  emergency_stop:
+    enabled: true
+    trigger_topics:
+      - /emergency_stop
+      - /safety_stop
+  
+  # 速率限制
+  rate_limit:
+    commands_per_minute: 60
+    max_concurrent: 1
+
+# AI 配置
+ai:
+  provider: "openclaw"
+  model: "default"
+  timeout: 30.0
+  language: "zh"  # 支持中文和英文
+
+# 通讯渠道配置
+channels:
+  cli:
+    enabled: true
+  
+  telegram:
+    enabled: false
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_users: []
+  
+  webhook:
+    enabled: true
+    host: "127.0.0.1"
+    port: 8080
+  
+  discord:
+    enabled: false
+    bot_token: "${DISCORD_BOT_TOKEN}"
+    channel_id: "${DISCORD_CHANNEL_ID}"
+
+# ROS 话题映射
+topics:
+  cmd_vel: "/cmd_vel"
+  odom: "/odom"
+  scan: "/scan"
+  camera: "/camera/image_raw"
+  battery: "/battery_state"
+  joint_states: "/joint_states"
+
+# ROS 服务映射
+services:
+  navigation: "/navigate_to_pose"
+  pick_place: "/pick_place"
+  get_state: "/get_robot_state"
+
+# ROS 动作映射
+actions:
+  navigation: "/navigate"
+  manipulation: "/manipulate"
+
+# 日志配置
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: "/tmp/clawros.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# 监控配置
+monitoring:
+  enabled: true
+  publish_rate: 10.0  # Hz
+  state_topic: "/clawros/state"
+  status_topic: "/clawros/status"
+  log_topic: "/clawros/log"
+
+# 性能优化
+performance:
+  use_compression: false
+  message_queue_size: 10
+  callback_timeout: 0.01
