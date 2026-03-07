@@ -88,6 +88,16 @@ python examples/demo_simulation.py
 python examples/simulator_launcher.py
 ```
 
+### 🧪 ROS Gazebo 仿真模式（骨架）
+
+```bash
+# 仅查看将要执行的 Gazebo/Nav2/RViz 命令
+python examples/ros_gazebo_launcher.py --config config/clawros_config.yaml --print-commands
+
+# 一键执行配置中的仿真命令并启动 ros_gazebo 桥接
+./scripts/start_ros_gazebo_mode.sh
+```
+
 ### 基本使用（真实 ROS 环境）
 
 ```bash

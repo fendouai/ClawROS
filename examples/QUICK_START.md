@@ -2,6 +2,18 @@
 
 ## 立即运行（无需 ROS！）
 
+### 方式 0: OpenClaw 一键接入（推荐）
+
+```bash
+cd ClawROS
+python examples/openclaw_sim_runner.py
+```
+
+**说明**:
+- 自动启动模拟桥接
+- 若检测到 OpenClaw/ZeroClaw，自动注册 ClawROS 工具
+- 若未检测到 OpenClaw，可直接用本地命令控制（move/nav/sensor/state/stop）
+
 ### 方式 1: 运行完整演示
 
 ```bash

@@ -6,6 +6,8 @@ This module provides the main bridge between OpenClaw AI assistant
 and ROS (Robot Operating System) for natural language robot control.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from dataclasses import dataclass, field
@@ -32,6 +34,13 @@ class ROSVersion(Enum):
     """ROS 版本枚举"""
     ROS1 = "ros1"
     ROS2 = "ros2"
+
+
+class RuntimeMode(Enum):
+    """运行模式枚举"""
+    ROS_DIRECT = "ros_direct"
+    ROS_GAZEBO = "ros_gazebo"
+    SIMPLE_SIM = "simple_sim"
 
 
 class CommandType(Enum):
@@ -423,10 +432,11 @@ class ClawROSBridge:
         logger.warning("EMERGENCY STOP TRIGGERED")
         # 发布零速度命令
         if self.adapter.node:
-            from geometry_msgs.msg import Twist
-            pub = self.adapter.create_publisher("/cmd_vel", Twist)
+            from geometry_msgs.msg import Twist, Vector3
+            cmd_vel_topic = self.config.get("topics", {}).get("cmd_vel", "/cmd_vel")
+            pub = self.adapter.create_publisher(cmd_vel_topic, Twist)
             if pub:
-                pub.publish(Twist(linear=Twist.Vector3(), angular=Twist.Vector3()))
+                pub.publish(Twist(linear=Vector3(), angular=Vector3()))
         return ROSResponse.success_response("Emergency stop executed")
     
     def _move(self, command: ROSCommand) -> ROSResponse:
@@ -472,27 +482,161 @@ class ClawROSBridge:
         # 实现工具注册逻辑
 
 
-def create_bridge(config_path: Optional[str] = None) -> ClawROSBridge:
+class ROSGazeboBridge(ClawROSBridge):
+    """
+    ROS + Gazebo 模式桥接骨架
+
+    说明:
+    - 该类提供 ros_gazebo 运行模式的统一入口
+    - 目前为骨架实现，真实导航/传感器回调可在此基础上补齐
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        super().__init__(config=config)
+        runtime_cfg = self.config.get("runtime", {})
+        self.gazebo_cfg = runtime_cfg.get("ros_gazebo", {})
+        self.topics = self.config.get("topics", {})
+        self.services = self.config.get("services", {})
+        self.actions = self.config.get("actions", {})
+
+    def initialize(self) -> bool:
+        logger.info("Initializing ClawROS Bridge in ros_gazebo mode")
+        ok = super().initialize()
+        if not ok:
+            return False
+
+        world = self.gazebo_cfg.get("world", "empty.sdf")
+        robot_model = self.gazebo_cfg.get("robot_model", "turtlebot3_waffle")
+        use_sim_time = self.gazebo_cfg.get("use_sim_time", True)
+        logger.info(
+            "ROS Gazebo context: world=%s robot_model=%s use_sim_time=%s",
+            world,
+            robot_model,
+            use_sim_time,
+        )
+        return True
+
+    def _move(self, command: ROSCommand) -> ROSResponse:
+        params = command.parameters
+        linear = float(params.get("linear", params.get("speed", 0.3)))
+        angular = float(params.get("angular", 0.0))
+        cmd_vel_topic = self.topics.get("cmd_vel", "/cmd_vel")
+
+        if self.adapter.node and ROS2_AVAILABLE:
+            try:
+                from geometry_msgs.msg import Twist
+
+                pub = self.adapter.create_publisher(cmd_vel_topic, Twist)
+                if not pub:
+                    return ROSResponse.error_response(
+                        f"Failed to create publisher for {cmd_vel_topic}"
+                    )
+
+                msg = Twist()
+                msg.linear.x = linear
+                msg.angular.z = angular
+                pub.publish(msg)
+            except Exception as e:
+                return ROSResponse.error_response(
+                    f"ros_gazebo move publish failed: {e}"
+                )
+
+        return ROSResponse.success_response(
+            f"[ros_gazebo] velocity command sent to {cmd_vel_topic}",
+            {"linear": linear, "angular": angular},
+        )
+
+    def _navigate(self, command: ROSCommand) -> ROSResponse:
+        nav_action = self.actions.get("navigation", "/navigate")
+        nav_service = self.services.get("navigation", "/navigate_to_pose")
+        params = command.parameters
+        return ROSResponse.success_response(
+            f"[ros_gazebo] navigation request accepted via action={nav_action} service={nav_service}",
+            {"target": command.target, "parameters": params},
+        )
+
+    def _get_sensor_data(self, command: ROSCommand) -> ROSResponse:
+        sensor_type = command.target
+        topic_map = {
+            "lidar": self.topics.get("scan", "/scan"),
+            "camera": self.topics.get("camera", "/camera/image_raw"),
+            "battery": self.topics.get("battery", "/battery_state"),
+            "odom": self.topics.get("odom", "/odom"),
+        }
+        sensor_topic = topic_map.get(sensor_type, f"/{sensor_type}")
+        return ROSResponse.success_response(
+            f"[ros_gazebo] sensor endpoint ready: {sensor_type}",
+            {"sensor_type": sensor_type, "topic": sensor_topic},
+        )
+
+    def get_robot_state(self) -> Dict[str, Any]:
+        state = super().get_robot_state()
+        state["runtime_mode"] = RuntimeMode.ROS_GAZEBO.value
+        state["sim_time"] = bool(self.gazebo_cfg.get("use_sim_time", True))
+        return state
+
+
+def _load_config(config_source: Optional[Union[str, Dict[str, Any]]]) -> Dict[str, Any]:
+    """加载配置，支持配置路径或配置字典。"""
+    if not config_source:
+        return {}
+
+    if isinstance(config_source, dict):
+        return config_source
+
+    if isinstance(config_source, str):
+        import yaml
+
+        try:
+            with open(config_source, "r") as f:
+                config = yaml.safe_load(f) or {}
+                logger.info(f"Loaded configuration from {config_source}")
+                return config
+        except Exception as e:
+            logger.warning(f"Failed to load config: {e}, using defaults")
+            return {}
+
+    logger.warning("Unsupported config source type: %s", type(config_source))
+    return {}
+
+
+def _resolve_runtime_mode(config: Dict[str, Any], mode: Optional[str]) -> RuntimeMode:
+    """解析运行模式。"""
+    mode_value = mode or config.get("runtime", {}).get("mode") or RuntimeMode.ROS_DIRECT.value
+    try:
+        return RuntimeMode(mode_value)
+    except Exception:
+        logger.warning("Unknown runtime mode '%s', fallback to ros_direct", mode_value)
+        return RuntimeMode.ROS_DIRECT
+
+
+def create_bridge(
+    config_path: Optional[Union[str, Dict[str, Any]]] = None,
+    mode: Optional[str] = None,
+) -> Any:
     """
     创建 ClawROS 桥接实例的工厂函数
     
     Args:
-        config_path: 配置文件路径
+        config_path: 配置文件路径或配置字典
+        mode: 显式运行模式（ros_direct/ros_gazebo/simple_sim），优先级高于配置文件
         
     Returns:
-        ClawROSBridge: 桥接实例
+        桥接实例（根据运行模式返回不同实现）
     """
-    config = {}
-    
-    if config_path:
-        import yaml
+    config = _load_config(config_path)
+    runtime_mode = _resolve_runtime_mode(config, mode)
+
+    if runtime_mode == RuntimeMode.SIMPLE_SIM:
         try:
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-                logger.info(f"Loaded configuration from {config_path}")
-        except Exception as e:
-            logger.warning(f"Failed to load config: {e}, using defaults")
-    
+            from simple_simulator import create_simulated_bridge
+        except ImportError:
+            from .simple_simulator import create_simulated_bridge
+        return create_simulated_bridge()
+
+    if runtime_mode == RuntimeMode.ROS_GAZEBO:
+        return ROSGazeboBridge(config)
+
     return ClawROSBridge(config)
 
 

@@ -77,7 +77,8 @@ class SimpleRobotSimulator:
         
         self.running = False
         self.thread: Optional[threading.Thread] = None
-        self.lock = threading.Lock()
+        # 使用可重入锁，避免在同线程内嵌套调用时死锁
+        self.lock = threading.RLock()
         
         # 环境障碍物
         self.obstacles: List[Tuple[float, float]] = [

@@ -3,6 +3,27 @@
 # ROS 版本选择：ros1 或 ros2
 ros_version: "ros2"
 
+# 运行模式:
+# - ros_direct: 直连 ROS（默认）
+# - ros_gazebo: ROS + Gazebo 仿真模式
+# - simple_sim: 内置轻量模拟器模式
+runtime:
+  mode: "ros_direct"
+
+  ros_gazebo:
+    use_sim_time: true
+    world: "empty.sdf"
+    robot_model: "turtlebot3_waffle"
+    gazebo_package: "turtlebot3_gazebo"
+    gazebo_launch_file: "empty_world.launch.py"
+    nav_package: "nav2_bringup"
+    nav_launch_file: "navigation_launch.py"
+    rviz_config: ""
+    launch_commands:
+      - "ros2 launch turtlebot3_gazebo empty_world.launch.py"
+      - "ros2 launch nav2_bringup navigation_launch.py use_sim_time:=true"
+      - "rviz2"
+
 # 默认坐标系
 default_frame: "base_link"
 
