@@ -1,0 +1,19 @@
+services:
+  ros2-sim:
+    build:
+      context: .
+      dockerfile: docker/ros2-sim/Dockerfile
+    container_name: clawros-ros2-sim
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    command: ["/bin/bash", "/workspace/docker/ros2-sim/start_sim.sh"]
+    environment:
+      - TURTLEBOT3_MODEL=waffle
+      - ROS_DOMAIN_ID=30
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+    ports:
+      - "9090:9090"
+    stdin_open: true
+    tty: true
+

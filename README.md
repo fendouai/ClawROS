@@ -98,6 +98,39 @@ python examples/ros_gazebo_launcher.py --config config/clawros_config.yaml --pri
 ./scripts/start_ros_gazebo_mode.sh
 ```
 
+### 🐳 ROS2 Docker 仿真（更接近真实 ROS）
+
+```bash
+# 1) 构建镜像
+./scripts/ros2_sim_docker.sh build
+
+# 2) 启动仿真（rosbridge :9090 + mock Nav2 FollowWaypoints）
+./scripts/ros2_sim_docker.sh up
+
+# 3) 查看日志
+./scripts/ros2_sim_docker.sh logs
+
+# 4) 进入容器检查 topic/node
+./scripts/ros2_sim_docker.sh shell
+
+# 5) 停止
+./scripts/ros2_sim_docker.sh down
+```
+
+### 🤖 一键 Demo: Claw 文本 -> Nav2 Waypoint Action -> Docker 可视化轨迹
+
+```bash
+# 一键运行（会自动：
+# 1) 启动 ROS2 Docker
+# 2) 调用 OpenClaw 将文本任务转 waypoint
+# 3) 发送 FollowWaypoints goal
+# 4) 启动/复用可视化窗口，显示来自 Docker /odom 的轨迹
+./scripts/demo_claw_nav2_waypoints.sh
+
+# 也可以传入自定义任务文本（建议包含坐标）
+./scripts/demo_claw_nav2_waypoints.sh "请走到(0.8,0.0)，再到(1.2,0.4)，最后回到(0.0,0.0)"
+```
+
 ### 基本使用（真实 ROS 环境）
 
 ```bash

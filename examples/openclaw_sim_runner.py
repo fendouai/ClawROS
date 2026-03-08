@@ -12,6 +12,8 @@ OpenClaw + ClawROS 模拟运行器
 """
 
 import os
+import json
+import subprocess
 import sys
 from typing import Any, Callable, Optional
 
@@ -20,6 +22,68 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from clawros_tools import ClawROSTools, register_with_openclaw
 from simple_simulator import create_simulated_bridge
+
+
+def _find_openclaw_cli() -> Optional[str]:
+    """定位 OpenClaw CLI。"""
+    candidates = [
+        os.path.expanduser("~/.openclaw/bin/openclaw"),
+        "/usr/local/bin/openclaw",
+        "/opt/homebrew/bin/openclaw",
+    ]
+    for path in candidates:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def _openclaw_cli_ok(cli_path: str) -> bool:
+    """检查 OpenClaw 网关是否可用。"""
+    try:
+        result = subprocess.run(
+            [cli_path, "gateway", "health", "--json"],
+            text=True,
+            capture_output=True,
+            timeout=8,
+            check=False,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _call_openclaw_cli(cli_path: str, user_text: str, agent_id: str = "main") -> str:
+    """通过 OpenClaw CLI 调用真实 Agent。"""
+    cmd = [
+        cli_path,
+        "agent",
+        "--agent",
+        agent_id,
+        "--message",
+        user_text,
+        "--json",
+    ]
+    result = subprocess.run(
+        cmd,
+        text=True,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "unknown error").strip()
+        return f"OpenClaw CLI 调用失败: {err}"
+
+    try:
+        data = json.loads(result.stdout)
+    except Exception:
+        return f"[OpenClaw:cli] {result.stdout.strip()}"
+
+    payloads = data.get("result", {}).get("payloads", [])
+    texts = [p.get("text", "").strip() for p in payloads if p.get("text")]
+    if texts:
+        return f"[OpenClaw:cli] {texts[-1]}"
+    return f"[OpenClaw:cli] {json.dumps(data, ensure_ascii=False)[:500]}"
 
 
 def _build_openclaw_instance() -> Optional[Any]:
@@ -126,7 +190,14 @@ def main() -> None:
 
     print("✓ 模拟桥已启动")
 
-    openclaw = _build_openclaw_instance()
+    openclaw_cli = _find_openclaw_cli()
+    openclaw_cli_ready = bool(openclaw_cli and _openclaw_cli_ok(openclaw_cli))
+    openclaw = None if openclaw_cli_ready else _build_openclaw_instance()
+
+    if openclaw_cli_ready:
+        print(f"✓ 已检测到 OpenClaw CLI: {openclaw_cli}")
+        print("✓ 将通过 OpenClaw 软件网关调用真实 Agent")
+
     if openclaw is not None:
         try:
             register_with_openclaw(tools, openclaw)
@@ -134,7 +205,7 @@ def main() -> None:
         except Exception as exc:
             openclaw = None
             print(f"! OpenClaw 注册失败，回退本地模式: {exc}")
-    else:
+    elif not openclaw_cli_ready:
         print("! 未检测到 OpenClaw，使用本地交互模式")
 
     print("\n提示:")
@@ -164,7 +235,9 @@ def main() -> None:
                 continue
 
             # 自然语言路径: 先尝试 OpenClaw, 否则给出提示
-            if openclaw is not None:
+            if openclaw_cli_ready and openclaw_cli is not None:
+                print(_call_openclaw_cli(openclaw_cli, line))
+            elif openclaw is not None:
                 print(_call_openclaw(openclaw, line))
             else:
                 print(
