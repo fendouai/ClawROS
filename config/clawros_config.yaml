@@ -7,6 +7,8 @@ ros_version: "ros2"
 # - ros_direct: 直连 ROS（默认）
 # - ros_gazebo: ROS + Gazebo 仿真模式
 # - simple_sim: 内置轻量模拟器模式
+# - humanoid_sim: 人形机器人仿真骨架模式
+# - lerobot_unitree_g1: LeRobot v0.5+ Unitree G1 集成骨架
 runtime:
   mode: "ros_direct"
 
@@ -23,6 +25,48 @@ runtime:
       - "ros2 launch turtlebot3_gazebo empty_world.launch.py"
       - "ros2 launch nav2_bringup navigation_launch.py use_sim_time:=true"
       - "rviz2"
+
+  humanoid_sim:
+    robot_model: "generic_humanoid"
+    controller_stack: "ros2_control"
+    planners:
+      - "footstep"
+      - "whole_body"
+      - "arm"
+    default_gait: "walk"
+    use_sim_time: true
+    joint_names:
+      - "left_hip_yaw"
+      - "left_hip_roll"
+      - "left_hip_pitch"
+      - "left_knee"
+      - "right_hip_yaw"
+      - "right_hip_roll"
+      - "right_hip_pitch"
+      - "right_knee"
+      - "waist_yaw"
+      - "left_shoulder_pitch"
+      - "right_shoulder_pitch"
+      - "head_yaw"
+    launch_commands:
+      - "ros2 launch humanoid_description display.launch.py"
+      - "ros2 launch humanoid_bringup simulation.launch.py use_sim_time:=true"
+      - "rviz2 -d config/humanoid.rviz"
+
+  lerobot_unitree_g1:
+    is_simulation: true
+    robot_profile: "g1_29dof"
+    teleop_id: "wbc_unitree"
+    policy: "none"
+    lerobot_repo: "~/src/lerobot"
+    lerobot_python: "python"
+    server_host: "127.0.0.1"
+    lowcmd_port: 6000
+    lowstate_port: 6001
+    video_port: 5555
+    launch_commands:
+      - "lerobot-teleoperate --robot.type=unitree_g1 --robot.is_simulation=true --teleop.type=unitree_g1 --teleop.id=wbc_unitree --robot.cameras='{\"global_view\": {\"type\": \"zmq\", \"server_address\": \"localhost\", \"port\": 5555, \"camera_name\": \"head_camera\", \"width\": 640, \"height\": 480, \"fps\": 30}}' --display_data=true"
+      - "python src/lerobot/robots/unitree_g1/run_g1_server.py"
 
 # 默认坐标系
 default_frame: "base_link"
@@ -92,17 +136,27 @@ topics:
   camera: "/camera/image_raw"
   battery: "/battery_state"
   joint_states: "/joint_states"
+  imu: "/imu/data"
+  foot_force: "/humanoid/foot_force"
+  gait_cmd: "/humanoid/gait_cmd"
+  whole_body_cmd: "/humanoid/whole_body_cmd"
 
 # ROS 服务映射
 services:
   navigation: "/navigate_to_pose"
   pick_place: "/pick_place"
   get_state: "/get_robot_state"
+  footstep_plan: "/humanoid/plan_footsteps"
+  whole_body_ik: "/humanoid/whole_body_ik"
 
 # ROS 动作映射
 actions:
   navigation: "/navigate"
   manipulation: "/manipulate"
+  footstep_navigation: "/humanoid/follow_footsteps"
+  left_arm_trajectory: "/humanoid/left_arm/follow_joint_trajectory"
+  right_arm_trajectory: "/humanoid/right_arm/follow_joint_trajectory"
+  whole_body: "/humanoid/whole_body_control"
 
 # 日志配置
 logging:

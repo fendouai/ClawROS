@@ -16,9 +16,13 @@ echo "[ros2-sim] starting mock Nav2 FollowWaypoints action server ..."
 python3 /workspace/docker/ros2-sim/mock_follow_waypoints_server.py &
 NAV2_MOCK_PID=$!
 
+echo "[ros2-sim] starting mock humanoid controller (/humanoid/* -> /joint_states) ..."
+python3 /workspace/docker/ros2-sim/mock_humanoid_controller.py &
+HUMANOID_MOCK_PID=$!
+
 cleanup() {
   echo "[ros2-sim] shutting down..."
-  kill "$BRIDGE_PID" "$NAV2_MOCK_PID" 2>/dev/null || true
+  kill "$BRIDGE_PID" "$NAV2_MOCK_PID" "$HUMANOID_MOCK_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 

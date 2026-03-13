@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Type, Union
@@ -41,6 +43,8 @@ class RuntimeMode(Enum):
     ROS_DIRECT = "ros_direct"
     ROS_GAZEBO = "ros_gazebo"
     SIMPLE_SIM = "simple_sim"
+    HUMANOID_SIM = "humanoid_sim"
+    LEROBOT_UNITREE_G1 = "lerobot_unitree_g1"
 
 
 class CommandType(Enum):
@@ -576,6 +580,254 @@ class ROSGazeboBridge(ClawROSBridge):
         return state
 
 
+class HumanoidSimBridge(ClawROSBridge):
+    """
+    人形机器人仿真模式桥接骨架
+
+    目标:
+    - 统一承载步态/足步/双臂/全身姿态等高层控制语义
+    - 为后续接入 ros2_control / MoveIt2 / Isaac / MuJoCo 提供接口层
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        super().__init__(config=config)
+        runtime_cfg = self.config.get("runtime", {})
+        self.humanoid_cfg = runtime_cfg.get("humanoid_sim", {})
+        self.topics = self.config.get("topics", {})
+        self.services = self.config.get("services", {})
+        self.actions = self.config.get("actions", {})
+        self.joint_names: List[str] = list(
+            self.humanoid_cfg.get(
+                "joint_names",
+                [
+                    "left_hip_yaw",
+                    "left_hip_roll",
+                    "left_hip_pitch",
+                    "left_knee",
+                    "right_hip_yaw",
+                    "right_hip_roll",
+                    "right_hip_pitch",
+                    "right_knee",
+                    "waist_yaw",
+                    "left_shoulder_pitch",
+                    "right_shoulder_pitch",
+                    "head_yaw",
+                ],
+            )
+        )
+        self.joint_positions: Dict[str, float] = {name: 0.0 for name in self.joint_names}
+        self.current_pose = "stand"
+        self.gait_mode = "idle"
+        self.last_linear = 0.0
+        self.last_angular = 0.0
+        self.gait_phase = 0.0
+        self.last_update_ts = time.time()
+
+    def initialize(self) -> bool:
+        logger.info("Initializing ClawROS Bridge in humanoid_sim mode")
+        ok = super().initialize()
+        if not ok:
+            return False
+
+        model = self.humanoid_cfg.get("robot_model", "generic_humanoid")
+        stack = self.humanoid_cfg.get("controller_stack", "ros2_control")
+        planners = self.humanoid_cfg.get("planners", ["footstep", "whole_body", "arm"])
+        logger.info(
+            "Humanoid sim context: model=%s stack=%s planners=%s",
+            model,
+            stack,
+            planners,
+        )
+        return True
+
+    def _move(self, command: ROSCommand) -> ROSResponse:
+        params = command.parameters
+        linear = float(params.get("linear", params.get("speed", 0.2)))
+        angular = float(params.get("angular", 0.0))
+        gait = str(params.get("gait", self.humanoid_cfg.get("default_gait", "walk")))
+        self.gait_mode = gait
+        self.last_linear = linear
+        self.last_angular = angular
+
+        gait_topic = self.topics.get("gait_cmd", "/humanoid/gait_cmd")
+        whole_body_topic = self.topics.get("whole_body_cmd", "/humanoid/whole_body_cmd")
+
+        # 骨架模拟：根据速度更新关键关节的示意值（非真实动力学）
+        amp = max(0.0, min(0.6, abs(linear) + abs(angular) * 0.4))
+        self.joint_positions["left_hip_pitch"] = amp
+        self.joint_positions["right_hip_pitch"] = -amp
+        self.joint_positions["left_knee"] = -amp * 0.7
+        self.joint_positions["right_knee"] = amp * 0.7
+        self.joint_positions["waist_yaw"] = max(-0.4, min(0.4, angular))
+
+        return ROSResponse.success_response(
+            f"[humanoid_sim] gait command accepted ({gait})",
+            {
+                "linear": linear,
+                "angular": angular,
+                "gait": gait,
+                "topics": {
+                    "gait_cmd": gait_topic,
+                    "whole_body_cmd": whole_body_topic,
+                },
+            },
+        )
+
+    def _navigate(self, command: ROSCommand) -> ROSResponse:
+        params = command.parameters
+        footstep_action = self.actions.get("footstep_navigation", "/humanoid/follow_footsteps")
+        nav_action = self.actions.get("navigation", "/navigate")
+        footstep_service = self.services.get("footstep_plan", "/humanoid/plan_footsteps")
+        return ROSResponse.success_response(
+            "[humanoid_sim] footstep navigation request accepted",
+            {
+                "target": command.target,
+                "parameters": params,
+                "action": footstep_action,
+                "fallback_navigation_action": nav_action,
+                "planning_service": footstep_service,
+            },
+        )
+
+    def _manipulate(self, command: ROSCommand) -> ROSResponse:
+        params = command.parameters
+        arm = str(params.get("arm", "both"))
+        posture = str(params.get("posture", "stand"))
+        self.current_pose = posture
+
+        left_arm_action = self.actions.get("left_arm_trajectory", "/humanoid/left_arm/follow_joint_trajectory")
+        right_arm_action = self.actions.get("right_arm_trajectory", "/humanoid/right_arm/follow_joint_trajectory")
+        whole_body_action = self.actions.get("whole_body", "/humanoid/whole_body_control")
+
+        if posture == "stand":
+            self.joint_positions["waist_yaw"] = 0.0
+            self.joint_positions["left_shoulder_pitch"] = 0.0
+            self.joint_positions["right_shoulder_pitch"] = 0.0
+        elif posture == "tpose":
+            self.joint_positions["left_shoulder_pitch"] = -1.2
+            self.joint_positions["right_shoulder_pitch"] = 1.2
+        elif posture == "crouch":
+            self.joint_positions["left_knee"] = -0.9
+            self.joint_positions["right_knee"] = 0.9
+
+        return ROSResponse.success_response(
+            "[humanoid_sim] manipulation request accepted",
+            {
+                "arm": arm,
+                "posture": posture,
+                "target": command.target,
+                "parameters": params,
+                "actions": {
+                    "left_arm": left_arm_action,
+                    "right_arm": right_arm_action,
+                    "whole_body": whole_body_action,
+                },
+            },
+        )
+
+    def _get_sensor_data(self, command: ROSCommand) -> ROSResponse:
+        sensor_type = command.target
+        topic_map = {
+            "imu": self.topics.get("imu", "/imu/data"),
+            "force_torque": self.topics.get("foot_force", "/humanoid/foot_force"),
+            "camera": self.topics.get("camera", "/camera/image_raw"),
+            "lidar": self.topics.get("scan", "/scan"),
+            "joint_states": self.topics.get("joint_states", "/joint_states"),
+            "odom": self.topics.get("odom", "/odom"),
+        }
+        sensor_topic = topic_map.get(sensor_type, f"/{sensor_type}")
+        return ROSResponse.success_response(
+            f"[humanoid_sim] sensor endpoint ready: {sensor_type}",
+            {"sensor_type": sensor_type, "topic": sensor_topic},
+        )
+
+    def _emergency_stop(self) -> ROSResponse:
+        self.gait_mode = "idle"
+        self.last_linear = 0.0
+        self.last_angular = 0.0
+        for name in self.joint_positions:
+            self.joint_positions[name] = 0.0
+        return ROSResponse.success_response("[humanoid_sim] emergency stop executed")
+
+    def get_robot_state(self) -> Dict[str, Any]:
+        now = time.time()
+        dt = max(0.0, now - self.last_update_ts)
+        self.last_update_ts = now
+
+        if self.gait_mode != "idle":
+            speed_scale = max(0.2, min(1.5, abs(self.last_linear) * 3.0 + abs(self.last_angular)))
+            self.gait_phase += dt * speed_scale * 3.2
+            swing = math.sin(self.gait_phase) * 0.45
+            self.joint_positions["left_hip_pitch"] = swing
+            self.joint_positions["right_hip_pitch"] = -swing
+            self.joint_positions["left_knee"] = -swing * 0.8
+            self.joint_positions["right_knee"] = swing * 0.8
+            self.joint_positions["left_shoulder_pitch"] = -swing * 0.5
+            self.joint_positions["right_shoulder_pitch"] = swing * 0.5
+
+        state = super().get_robot_state()
+        state["runtime_mode"] = RuntimeMode.HUMANOID_SIM.value
+        state["humanoid"] = {
+            "robot_model": self.humanoid_cfg.get("robot_model", "generic_humanoid"),
+            "gait_mode": self.gait_mode,
+            "pose": self.current_pose,
+            "joint_positions": self.joint_positions.copy(),
+            "controller_stack": self.humanoid_cfg.get("controller_stack", "ros2_control"),
+        }
+        return state
+
+
+class LeRobotUnitreeG1Bridge(HumanoidSimBridge):
+    """
+    LeRobot Unitree G1 集成桥接骨架
+
+    目标:
+    - 复用 humanoid 高层语义接口
+    - 映射到 LeRobot 的 Unitree G1 sim / remote / real-robot 工作流
+    - 为后续接入 run_g1_server、MuJoCo sim、policy inference 预留配置入口
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        super().__init__(config=config)
+        runtime_cfg = self.config.get("runtime", {})
+        self.lerobot_cfg = runtime_cfg.get("lerobot_unitree_g1", {})
+
+    def initialize(self) -> bool:
+        logger.info("Initializing ClawROS Bridge in lerobot_unitree_g1 mode")
+        ok = super().initialize()
+        if not ok:
+            return False
+
+        logger.info(
+            "LeRobot Unitree G1 context: simulation=%s profile=%s teleop=%s policy=%s",
+            self.lerobot_cfg.get("is_simulation", True),
+            self.lerobot_cfg.get("robot_profile", "g1_29dof"),
+            self.lerobot_cfg.get("teleop_id", "wbc_unitree"),
+            self.lerobot_cfg.get("policy", "none"),
+        )
+        return True
+
+    def get_robot_state(self) -> Dict[str, Any]:
+        state = super().get_robot_state()
+        state["runtime_mode"] = RuntimeMode.LEROBOT_UNITREE_G1.value
+        state["lerobot"] = {
+            "robot_type": "unitree_g1",
+            "is_simulation": bool(self.lerobot_cfg.get("is_simulation", True)),
+            "robot_profile": self.lerobot_cfg.get("robot_profile", "g1_29dof"),
+            "teleop_id": self.lerobot_cfg.get("teleop_id", "wbc_unitree"),
+            "policy": self.lerobot_cfg.get("policy", "none"),
+            "server": {
+                "host": self.lerobot_cfg.get("server_host", "127.0.0.1"),
+                "lowcmd_port": int(self.lerobot_cfg.get("lowcmd_port", 6000)),
+                "lowstate_port": int(self.lerobot_cfg.get("lowstate_port", 6001)),
+                "video_port": int(self.lerobot_cfg.get("video_port", 5555)),
+            },
+        }
+        state["humanoid"]["robot_model"] = "unitree_g1"
+        state["humanoid"]["controller_stack"] = "lerobot"
+        return state
+
+
 def _load_config(config_source: Optional[Union[str, Dict[str, Any]]]) -> Dict[str, Any]:
     """加载配置，支持配置路径或配置字典。"""
     if not config_source:
@@ -619,7 +871,7 @@ def create_bridge(
     
     Args:
         config_path: 配置文件路径或配置字典
-        mode: 显式运行模式（ros_direct/ros_gazebo/simple_sim），优先级高于配置文件
+        mode: 显式运行模式（ros_direct/ros_gazebo/simple_sim/humanoid_sim/lerobot_unitree_g1），优先级高于配置文件
         
     Returns:
         桥接实例（根据运行模式返回不同实现）
@@ -636,6 +888,12 @@ def create_bridge(
 
     if runtime_mode == RuntimeMode.ROS_GAZEBO:
         return ROSGazeboBridge(config)
+
+    if runtime_mode == RuntimeMode.HUMANOID_SIM:
+        return HumanoidSimBridge(config)
+
+    if runtime_mode == RuntimeMode.LEROBOT_UNITREE_G1:
+        return LeRobotUnitreeG1Bridge(config)
 
     return ClawROSBridge(config)
 

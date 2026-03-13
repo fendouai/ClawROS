@@ -98,6 +98,114 @@ python examples/ros_gazebo_launcher.py --config config/clawros_config.yaml --pri
 ./scripts/start_ros_gazebo_mode.sh
 ```
 
+### 🦿 Humanoid 仿真模式（骨架）
+
+```bash
+# 1) 查看人形模式预设启动命令（不执行）
+python examples/humanoid_sim_launcher.py --config config/clawros_config.yaml --print-commands
+
+# 2) 进入人形模式交互（walk/step/arm/pose/sensor/stop）
+python examples/humanoid_sim_launcher.py --config config/clawros_config.yaml
+
+# 3) 一键执行配置里的外部仿真命令并进入交互
+./scripts/start_humanoid_sim_mode.sh
+
+# 4) 启动人形可视化骨架窗口（支持交互命令）
+python examples/humanoid_visualizer.py
+```
+
+> 进一步技术调研与落地路线见: [docs/HUMANOID_SIM_ROADMAP.md](docs/HUMANOID_SIM_ROADMAP.md)
+
+### 🤖 LeRobot Unitree G1 模式（v0.5.0 集成骨架）
+
+LeRobot `v0.5.0` 已新增 Unitree G1 完整支持，包含：
+
+- Unitree G1 23/29 DoF 支持
+- MuJoCo 仿真 teleop
+- `run_g1_server.py` 远端 DDS <-> ZMQ 桥
+- `Pi0-FAST` 自回归 VLA
+- `Real-Time Chunking`
+- 流式视频编码
+
+本仓库现已增加 `lerobot_unitree_g1` 集成骨架，用于把 ClawROS 的人形高层语义接到 LeRobot G1 后端。
+
+```bash
+# 1) 查看当前 LeRobot G1 集成配置与推荐命令
+python examples/lerobot_unitree_g1_launcher.py --print-commands
+
+# 2) 进入 LeRobot G1 交互骨架模式
+python examples/lerobot_unitree_g1_launcher.py
+
+# 3) 脚本方式启动
+./scripts/start_lerobot_unitree_g1_mode.sh
+```
+
+当前这部分是“集成入口已整理好”，不是“真机已默认接通”。
+原因是 LeRobot 的 G1 支持本质上是 `Python + Unitree SDK2 + MuJoCo/ZMQ` 工作流，不是原生 ROS2 topic/action 接口。
+因此更稳的路线是让 ClawROS 做高层语义桥接，再由适配层落到 LeRobot 的 G1 robot / teleoperator / policy API。
+
+> 详细调研和接入建议见: [docs/LEROBOT_UNITREE_G1_INTEGRATION.md](docs/LEROBOT_UNITREE_G1_INTEGRATION.md)
+
+### 🦾 一键 Demo: Claw 文本 -> LeRobot Unitree G1 MuJoCo sim
+
+这条链路会把 `walk / pose / stop` 直接映射到 LeRobot `UnitreeG1.send_action()`：
+
+- `walk` -> `remote.lx / remote.rx`，交给 Holosoma 或 GR00T locomotion controller
+- `pose` -> G1 上肢关节目标
+- `stop` -> 清零 remote axes
+
+```bash
+# 需要先准备好 conda 环境 `lerobot-g1`
+./scripts/demo_claw_lerobot_g1.sh
+
+# 自定义任务文本
+./scripts/demo_claw_lerobot_g1.sh "前进两步，右转，再做 tpose，最后停止"
+```
+
+默认使用 `HolosomaLocomotionController`。如需切换可设置：
+
+```bash
+LEROBOT_G1_CONTROLLER=GrootLocomotionController ./scripts/demo_claw_lerobot_g1.sh
+```
+
+macOS 下官方 MuJoCo viewer 通常要求 `mjpython`：
+
+```bash
+LEROBOT_G1_PYTHON=mjpython ./scripts/demo_claw_lerobot_g1.sh
+```
+
+如果当前会话是无界面环境，可先用 headless 验证 backend：
+
+```bash
+LEROBOT_G1_HEADLESS=1 LEROBOT_G1_PYTHON=python ./scripts/demo_claw_lerobot_g1.sh
+```
+
+当前仓库已经验证过 `headless` 路径可运行，并能返回 G1 关节/姿态摘要。
+
+### 👁️ 一键 Demo: Claw -> LeRobot G1 sim -> 现有可视化窗口
+
+这条链路会：
+
+- 启动或复用 `ros2-sim` 的 `rosbridge`
+- 启动或复用现有 [`docker_humanoid_visual.py`](/Users/f/GitHub/ClawROS/examples/docker_humanoid_visual.py)
+- 运行 LeRobot G1 MuJoCo sim
+- 将 sim 状态回灌到 `/joint_states` 和 `/odom`
+- 在现有骨架 + 轨迹窗口里显示
+
+```bash
+# 推荐先用 headless backend 验证状态流
+LEROBOT_G1_HEADLESS=1 LEROBOT_G1_PYTHON=python ./scripts/demo_claw_lerobot_g1_visual.sh
+
+# 自定义任务文本
+LEROBOT_G1_HEADLESS=1 LEROBOT_G1_PYTHON=python ./scripts/demo_claw_lerobot_g1_visual.sh "前进，右转，再做 tpose，最后停止"
+```
+
+桌面图形会话里，如果你希望 LeRobot 自己的 MuJoCo viewer 也打开，可以改用：
+
+```bash
+LEROBOT_G1_HEADLESS=0 LEROBOT_G1_PYTHON=mjpython ./scripts/demo_claw_lerobot_g1_visual.sh
+```
+
 ### 🐳 ROS2 Docker 仿真（更接近真实 ROS）
 
 ```bash
@@ -130,6 +238,23 @@ python examples/ros_gazebo_launcher.py --config config/clawros_config.yaml --pri
 # 也可以传入自定义任务文本（建议包含坐标）
 ./scripts/demo_claw_nav2_waypoints.sh "请走到(0.8,0.0)，再到(1.2,0.4)，最后回到(0.0,0.0)"
 ```
+
+### 🦿 一键 Demo: Claw 文本 -> Humanoid Task -> Docker 可视化
+
+```bash
+# 一键运行（会自动：
+# 1) 启动 ROS2 Docker
+# 2) 等待 rosbridge 和 /joint_states
+# 3) 启动/复用人形可视化窗口（骨架 + 轨迹）
+# 4) 调用 OpenClaw 把文本转 humanoid plan
+# 5) 通过 rosbridge 执行 humanoid 任务
+./scripts/demo_claw_humanoid.sh
+
+# 传入自定义任务文本
+./scripts/demo_claw_humanoid.sh "前进两步，左转小走，再做 crouch，最后站立停止"
+```
+
+> 若在无图形环境（headless）运行，脚本会继续执行任务但提示可视化窗口未启动；可在桌面会话中直接运行 `python examples/docker_humanoid_visual.py` 查看。
 
 ### 基本使用（真实 ROS 环境）
 
