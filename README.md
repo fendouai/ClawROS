@@ -192,6 +192,10 @@ LEROBOT_G1_HEADLESS=1 LEROBOT_G1_PYTHON=python ./scripts/demo_claw_lerobot_g1.sh
 - 将 sim 状态回灌到 `/joint_states` 和 `/odom`
 - 在现有骨架 + 轨迹窗口里显示
 
+![LeRobot G1 visual flow](/Users/f/GitHub/ClawROS/docs/images/lerobot_g1_visual_flow.png)
+
+上图根据真实运行时的 `/joint_states` 和 `/odom` 数据生成，展示了 `Claw -> LeRobot G1 sim -> 可视化状态流` 的最终效果。
+
 ```bash
 # 推荐先用 headless backend 验证状态流
 LEROBOT_G1_HEADLESS=1 LEROBOT_G1_PYTHON=python ./scripts/demo_claw_lerobot_g1_visual.sh
